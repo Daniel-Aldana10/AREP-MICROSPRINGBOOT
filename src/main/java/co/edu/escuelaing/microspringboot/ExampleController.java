@@ -14,7 +14,7 @@ public class ExampleController {
         return "Hello " + name  + ", you are " + age + " years old";
     }
     @GetMapping("/userInfo")
-    public String getUser(@RequestParam("name") String name) {
+    public static String getUser(@RequestParam("name") String name) {
         String age = users.get(name);
         return (age != null) ? "User " + name + " retrieved value: age is " + age : "User data not found for " + name;
     }
