@@ -6,7 +6,7 @@ package co.edu.escuelaing.microspringboot;
 
 /**
  *
- * @author curso
+ * @author daniel.aldana-b
  */
 @RestController
 public class HelloController {

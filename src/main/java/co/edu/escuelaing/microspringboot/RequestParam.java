@@ -11,12 +11,11 @@ import java.lang.annotation.Target;
 
 /**
  *
- * @author curso
+ * @author daniel.aldana-b
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.PARAMETER)
 public @interface RequestParam {
-    public String value();
-    public String defaultValue();
-    
+    String value();
+    String defaultValue() default "";
 }

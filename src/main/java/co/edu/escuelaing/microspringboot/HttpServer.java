@@ -12,9 +12,7 @@ import java.lang.reflect.Parameter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -27,9 +25,9 @@ import java.util.logging.Logger;
 public class HttpServer {
     //Map containing registered REST services mapped by their paths
     public static Map<String, Method> services = new HashMap();
-    public static Map<String, Parameter> requests = new HashMap();
+    public static Map<String, List<Parameter>> requests = new HashMap();
     // Root directory for serving static files
-    public static String ROOT_DIRECTORY = "target/classes";
+    public static String ROOT_DIRECTORY = "target/classes/webroot";
 
     /**
      * Starts the HTTP server and begins listening for incoming connections.
@@ -41,7 +39,7 @@ public class HttpServer {
      * @throws URISyntaxException if there's an error parsing request URIs
      */
     public static void runServer(String[] args) throws IOException, URISyntaxException {
-        loadComponents(args);
+
         ServerSocket serverSocket = null;
         try {
             serverSocket = new ServerSocket(35000);
@@ -51,6 +49,7 @@ public class HttpServer {
         }
         Socket clientSocket = null;
         boolean running = true;
+        loadComponents(args);
         while (running) {
             try {
                 System.out.println("Listo para recibir ...");
@@ -78,7 +77,11 @@ public class HttpServer {
                     break;
                 }
             }
-            handleRequest(requri, out, clientSocket);
+            try{
+                handleRequest(requri, out, clientSocket);
+            }catch(Exception ex){
+                Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, null, ex);
+            }
             //out.println(outputLine);
             out.close();
             in.close();
@@ -110,7 +113,7 @@ public class HttpServer {
             String output = invokeService(uri);
             out.println(output);
         }
-        else{
+        else if (uri != null){
             // Handle static files
             Path directory = Path.of(ROOT_DIRECTORY, uri.getPath());
             if(Files.isDirectory(directory)){
@@ -234,56 +237,94 @@ public class HttpServer {
      */
     public static String invokeService(URI uri){
         String key = uri.getPath();
-        System.out.println("hola" + " : " + key);
+        System.out.println("Invoking service for path: " + key);
         Method s = services.get(key);
-        HttpRequest httpRequest = new HttpRequest(uri);
+        
         if (s != null) {
-            Parameter p = requests.get(key);
-            String[] params = null;
-            if(p != null){
-                RequestParam param = p.getAnnotation(RequestParam.class);
-                String value = httpRequest.getValue(param.value());
-                params = new String[1];
-                params[0] = value;
-            }
-            HttpRequest req = new HttpRequest(uri);
-            HttpResponse res = new HttpResponse();
             try {
-                //String serviceResponse = s.invoke(req, res);
-                return "HTTP/1.1 " + res.getStatusCode() + " " + res.getStatusMessage() + "\r\n"
-                        + "content-type: " + res.getContentType() + "\r\n"
-                        + "\r\n" + s.invoke(null, params);
+                // Get parameters for this method
+                Parameter[] parameters = s.getParameters();
+                Object[] args = new Object[parameters.length];
+                
+                // Parse query parameters
+                HttpRequest httpRequest = new HttpRequest(uri);
+                
+                for (int i = 0; i < parameters.length; i++) {
+                    Parameter p = parameters[i];
+                    if (p.isAnnotationPresent(RequestParam.class)) {
+                        RequestParam param = p.getAnnotation(RequestParam.class);
+                        String value = httpRequest.getValue(param.value());
+                        // Use defaultValue if parameter is not provided
+                        if (value == null || value.isEmpty()) {
+                            value = param.defaultValue();
+                        }
+                        args[i] = value;
+                    } else {
+                        // For non-annotated parameters, pass null
+                        args[i] = null;
+                    }
+                }
+                
+                // Invoke the method
+                Object result = s.invoke(null, args);
+                
+                // Return HTTP response
+                return "HTTP/1.1 200 OK\r\n"
+                        + "content-type: text/plain; charset=utf-8\r\n"
+                        + "\r\n" + result.toString();
+                        
             } catch (IllegalAccessException ex) {
                 Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, null, ex);
+                return "HTTP/1.1 500 Internal Server Error\r\n"
+                        + "content-type: text/plain; charset=utf-8\r\n"
+                        + "\r\n" + "Internal Server Error: " + ex.getMessage();
             } catch (InvocationTargetException ex) {
                 Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, null, ex);
+                return "HTTP/1.1 500 Internal Server Error\r\n"
+                        + "content-type: text/plain; charset=utf-8\r\n"
+                        + "\r\n" + "Internal Server Error: " + ex.getTargetException().getMessage();
             }
         }
+        
         return "HTTP/1.1 404 Not Found\r\n" + "content-type: text/plain; charset=utf-8\r\n"
                + "\r\n" + "Service not found";
     }
 
-    private static void loadComponents(String[] args) {
+    public static void loadComponents(String[] args) {
         try {
-            Class c = Class.forName(args[0]);
-            if(c.isAnnotationPresent(RestController.class)){
-                Method[] methods = c.getDeclaredMethods();
-                for(Method m:methods){
-                    if(m.isAnnotationPresent(GetMapping.class)){
-                        String mapping = m.getAnnotation(GetMapping.class).value();
-                        services.put(mapping, m);
-                        Parameter[] parameters = m.getParameters();
-                        for(Parameter p: parameters){
-                            if(p.isAnnotationPresent(RequestParam.class)){
-                                requests.put(mapping, p);
-                            }
-                   
-                        }
-                    }
-                }
+            List<Class<?>> classes = ComponentScanner.scanForControllers("co.edu.escuelaing.microspringboot");
+            for (Class<?> cl : classes){
+                loadComponent(cl);
             }
-        } catch (ClassNotFoundException ex) {
+        } catch (ClassNotFoundException | IOException ex) {
             Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, null, ex);
         }
+    }
+
+    static void loadComponent(Class<?> c){
+        if(!c.isAnnotationPresent(RestController.class)) {
+            return;
+        }
+        Method[] methods = c.getDeclaredMethods();
+        for(Method m : methods){
+            if(!m.isAnnotationPresent(GetMapping.class)){
+                continue;
+            }
+            String mapping = m.getAnnotation(GetMapping.class).value();
+            System.out.println(mapping);
+            services.put(mapping, m);
+            checkMethodParameters(m, mapping);
+        }
+    }
+    private static void checkMethodParameters(Method method, String mapping) {
+        Parameter[] params = method.getParameters();
+        for (Parameter p : params) {
+            if (p.isAnnotationPresent(RequestParam.class)) {
+                requests.computeIfAbsent(mapping, l -> new ArrayList<>()).add(p);
+            }
+        }
+    }
+    public static void main(String[] args) throws IOException, URISyntaxException  {
+        runServer(args);
     }
 }

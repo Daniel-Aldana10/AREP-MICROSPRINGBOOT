@@ -12,7 +12,7 @@ import java.lang.annotation.Target;
 
 /**
  *
- * @author curso
+ * @author daniel.aldana-b
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)
